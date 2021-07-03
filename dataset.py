@@ -84,5 +84,9 @@ def collate_fn(data):
     return text_ids, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval
 
 def BuildDataloader(dataset, batch_size, shuffle, num_workers, ddp=False):
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers)
+    if ddp:
+        sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=batch_size)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers)
+    else:
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers)
     return dataloader

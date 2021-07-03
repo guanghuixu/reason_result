@@ -73,13 +73,13 @@ class Generation:
                 tokens.append(self.vocabs_anno['common_vocabs'][idx])
             else:
                 tokens.append(self.vocabs_anno[flag][idx-self.common_num])
-        return tokens
+        return ','.join(tokens)
     
     def generate_batch(self, text_ids, output):
         batch_size = output[0][0].size(0)
         batch_generations = []
         for batch in range(batch_size):
-            text_id_dict = {'text_id': text_ids[batch], 'result': []}
+            text_id_dict = {"text_id": text_ids[batch], "result": []}
             for group in range(5):
                 group_dict = {}
                 cls_pred, reason_type, reason_product, reason_region, reason_industry, \
@@ -87,23 +87,23 @@ class Generation:
                 if self.sigmoid(cls_pred[batch]) < 0.5:
                     continue
                 # print(text_ids[batch])
-                group_dict['reason_type'] = self.generate_token([reason_type[batch].argmax().item()], flag='reason_type')
-                group_dict['result_type'] = self.generate_token([result_type[batch].argmax().item()], flag='result_type')
+                group_dict["reason_type"] = self.generate_token([reason_type[batch].argmax().item()], flag="reason_type")
+                group_dict["result_type"] = self.generate_token([result_type[batch].argmax().item()], flag="result_type")
                 # multi_label_prediction
-                group_dict['reason_product'] = self.generate_token(
-                    self.obtain_multi_idx(reason_product[batch]), flag='reason_product')
-                group_dict['reason_region'] = self.generate_token(
-                    self.obtain_multi_idx(reason_region[batch]), flag='reason_region')
-                group_dict['reason_industry'] = self.generate_token(
-                    self.obtain_multi_idx(reason_industry[batch]), flag='reason_industry')
-                group_dict['result_product'] = self.generate_token(
-                    self.obtain_multi_idx(result_product[batch]), flag='result_product')
-                group_dict['result_region'] = self.generate_token(
-                    self.obtain_multi_idx(result_region[batch]), flag='result_region')
-                group_dict['result_industry'] = self.generate_token(
-                    self.obtain_multi_idx(result_industry[batch]), flag='result_industry')
-                text_id_dict['result'].append(group_dict)
-        batch_generations.append(text_id_dict)
+                group_dict["reason_product"] = self.generate_token(
+                    self.obtain_multi_idx(reason_product[batch]), flag="reason_product")
+                group_dict["reason_region"] = self.generate_token(
+                    self.obtain_multi_idx(reason_region[batch]), flag="reason_region")
+                group_dict["reason_industry"] = self.generate_token(
+                    self.obtain_multi_idx(reason_industry[batch]), flag="reason_industry")
+                group_dict["result_product"] = self.generate_token(
+                    self.obtain_multi_idx(result_product[batch]), flag="result_product")
+                group_dict["result_region"] = self.generate_token(
+                    self.obtain_multi_idx(result_region[batch]), flag="result_region")
+                group_dict["result_industry"] = self.generate_token(
+                    self.obtain_multi_idx(result_industry[batch]), flag="result_industry")
+                text_id_dict["result"].append(group_dict)
+            batch_generations.append(text_id_dict)
         return batch_generations
 
 def transform_output2batch(output):

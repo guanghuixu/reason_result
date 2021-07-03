@@ -94,6 +94,7 @@ class BertMultiTaskModel(BertPreTrainedModel):
             bi_mask[:, ii: (i+1)*3] = 1.
             _, mmt_dec_output = self.decoder(txt_emb, txt_mask, pred_empty_pair.clone(),
                     reason_weights, result_weights, bi_mask=bi_mask)
+                    
             cls, reason, result = mmt_dec_output[:, ii], mmt_dec_output[:, ii+1], mmt_dec_output[:, ii+2] 
             type_output = self._forward_type_classifier(cls, reason, result)
             output = self._forward_more_classifier(type_output, reason, result)
@@ -101,7 +102,10 @@ class BertMultiTaskModel(BertPreTrainedModel):
             if labels is not None:
                 loss = 0.
                 for iii, key in enumerate(['cls'] + CFG['task_list'][1:]):
-                    loss += self.loss_fn(output[iii], labels[i][key]) / CFG['accum_iter']
+                    lv = self.loss_fn(output[iii], labels[i][key]) / CFG['accum_iter']
+                    if key in ['cls', 'reason_type', 'result_type']:
+                        lv = lv * 10
+                    loss += lv
                 losses.append(loss)
             if self.training:  # teacher forcing
                 pred_empty_pair[:, ii:(i+1)*3] = cls_reason_result[:, ii:(i+1)*3]

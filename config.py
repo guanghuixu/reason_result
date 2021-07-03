@@ -3,11 +3,11 @@ CFG = { #训练的参数配置
     'seed': 2021,
     'model': 'hfl/chinese-bert-wwm-ext', #预训练模型
     'max_len': 256, #文本截断的最大长度
-    'epochs': 100,
-    'train_bs': 12, #batch_size，可根据自己的显存调整
-    'valid_bs': 12,
+    'epochs': 200,
+    'train_bs': 8, #batch_size，可根据自己的显存调整
+    'valid_bs': 8,
     'lr': 2e-5, #学习率
-    'num_workers': 14,
+    'num_workers': 8,
     'accum_iter': 2, #梯度累积，相当于将batch_size*2
     'weight_decay': 1e-4, #权重衰减，防止过拟合
     'device': 0,
