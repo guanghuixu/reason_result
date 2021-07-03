@@ -11,6 +11,7 @@ from collections import Counter
 from torch.nn.modules import activation
 from config import CFG
 import torch
+import numpy as np
 
 def txt2json(file):
     data_list = []
@@ -53,6 +54,57 @@ def send_emails(subject="Recording experiments logs", content="Anything you want
         s.sendmail(msg_from, msg_to, multipart.as_bytes())
     else:
         s.sendmail(msg_from, msg_to, msg.as_string())
+
+
+class Generation:
+    def __init__(self, vocabs_anno):
+        self.common_num = len(vocabs_anno['common_vocabs'])
+        self.vocabs_anno = vocabs_anno
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def obtain_multi_idx(self, value, theta=0.5):
+        return np.where(value.cpu().numpy()>=theta)[0]
+    
+    def generate_token(self, multi_idx, flag):
+        tokens = []
+        # print(multi_idx)
+        for idx in multi_idx:
+            if idx<self.common_num:
+                tokens.append(self.vocabs_anno['common_vocabs'][idx])
+            else:
+                tokens.append(self.vocabs_anno[flag][idx-self.common_num])
+        return tokens
+    
+    def generate_batch(self, text_ids, output):
+        batch_size = output[0][0].size(0)
+        batch_generations = []
+        for batch in range(batch_size):
+            text_id_dict = {'text_id': text_ids[batch], 'result': []}
+            for group in range(5):
+                group_dict = {}
+                cls_pred, reason_type, reason_product, reason_region, reason_industry, \
+                        result_type, result_product, result_region, result_industry = output[group]
+                if self.sigmoid(cls_pred[batch]) < 0.5:
+                    continue
+                # print(text_ids[batch])
+                group_dict['reason_type'] = self.generate_token([reason_type[batch].argmax().item()], flag='reason_type')
+                group_dict['result_type'] = self.generate_token([result_type[batch].argmax().item()], flag='result_type')
+                # multi_label_prediction
+                group_dict['reason_product'] = self.generate_token(
+                    self.obtain_multi_idx(reason_product[batch]), flag='reason_product')
+                group_dict['reason_region'] = self.generate_token(
+                    self.obtain_multi_idx(reason_region[batch]), flag='reason_region')
+                group_dict['reason_industry'] = self.generate_token(
+                    self.obtain_multi_idx(reason_industry[batch]), flag='reason_industry')
+                group_dict['result_product'] = self.generate_token(
+                    self.obtain_multi_idx(result_product[batch]), flag='result_product')
+                group_dict['result_region'] = self.generate_token(
+                    self.obtain_multi_idx(result_region[batch]), flag='result_region')
+                group_dict['result_industry'] = self.generate_token(
+                    self.obtain_multi_idx(result_industry[batch]), flag='result_industry')
+                text_id_dict['result'].append(group_dict)
+        batch_generations.append(text_id_dict)
+        return batch_generations
 
 def transform_output2batch(output):
     sigmoid = torch.nn.Sigmoid()

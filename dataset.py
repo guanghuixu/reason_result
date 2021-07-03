@@ -28,8 +28,7 @@ def TestDataset(vocab_type='most_common_1'):
     test_anno = load_json('dataset/ccks_task2_eval.json')
     vocabs_anno = load_json('dataset/global_vocabs.json')[vocab_type]
     task_num_classes = {task: len(vocabs_anno[task]) for task in task_list}
-    return test_anno, task_num_classes
-
+    return test_anno, vocabs_anno, task_num_classes
 
 class MyDataset(Dataset):
     def __init__(self, all_anno, labels, tokenizer, vocab_type='most_common_1', max_len=256):
@@ -51,15 +50,17 @@ class MyDataset(Dataset):
         else:
             labels = []
         
-        return text, labels
+        return cur_sample["text_id"], text, labels
 
 def collate_fn(data): 
     input_ids, attention_mask, token_type_ids = [], [], []
     labels_dict = [{task: [] for task in gt_list} for _ in range(5)]
     cls_reason_result = []
     gt_for_eval = []
+    text_ids = []
     for sample in data:
-        text, labels = sample
+        text_id, text, labels = sample
+        text_ids.append(text_id)
         pair_type = []
         input_ids.append(text['input_ids'])
         attention_mask.append(text['attention_mask'])
@@ -80,7 +81,7 @@ def collate_fn(data):
     token_type_ids = torch.cat(token_type_ids)
     labels_dict = [{task: torch.tensor(labels[task]) for task in gt_list} for labels in labels_dict]
     cls_reason_result = torch.tensor(cls_reason_result).long()
-    return input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval
+    return text_ids, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval
 
 def BuildDataloader(dataset, batch_size, shuffle, num_workers, ddp=False):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn, num_workers=num_workers)

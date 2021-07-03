@@ -64,7 +64,7 @@ def train_model(model, train_loader): #训练一个epoch
     
     tk = tqdm(train_loader, total=len(train_loader), position=0, leave=True)
     
-    for step, (input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
+    for step, (_, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
 
         input_ids, attention_mask, token_type_ids = input_ids.to(device), attention_mask.to(device), token_type_ids.to(device)
         labels_dict = [{key: value.to(device) for key, value in labels.items()} for labels in labels_dict]
@@ -103,7 +103,7 @@ def test_model(model, val_loader): #验证
     
     with torch.no_grad():
         tk = tqdm(val_loader, total=len(val_loader), position=0, leave=True)
-        for step, (input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
+        for step, (_, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
     
             input_ids, attention_mask, token_type_ids = input_ids.to(device), attention_mask.to(device), token_type_ids.to(device)
             labels_dict = [{key: value.to(device) for key, value in labels.items()} for labels in labels_dict]
@@ -165,39 +165,4 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
             torch.save(model.state_dict(), '{}_fold_{}.pt'.format(CFG['model'].split('/')[-1], fold))
             
     cv.append(best_acc) 
-
-
-
-test_set = MyDataset(test_df)
-test_loader = DataLoader(test_set, batch_size=CFG['valid_bs'], collate_fn=collate_fn, shuffle=False, num_workers=CFG['num_workers'])
-
-model =  BertForMultipleChoice.from_pretrained(CFG['model']).to(device)
-
-predictions = []
-
-for fold in [0,1,2,3,4]: #把训练后的五个模型挨个进行预测
-    y_pred = []
-    model.load_state_dict(torch.load('{}_fold_{}.pt'.format(CFG['model'].split('/')[-1], fold)))
-    
-    with torch.no_grad():
-        tk = tqdm(test_loader, total=len(test_loader), position=0, leave=True)
-        for idx, (input_ids, attention_mask, token_type_ids) in enumerate(tk):
-            input_ids, attention_mask, token_type_ids, y = input_ids.to(device), attention_mask.to(device), token_type_ids.to(device), y.to(device).long()
-
-            output = model(input_ids, attention_mask, token_type_ids).logits.cpu().numpy()
-
-            y_pred.extend(output)
-            
-    predictions += [y_pred]
-
-predictions = np.mean(predictions,0).argmax(1) #将结果按五折进行平均，然后argmax得到label
-
-
-
-sub = pd.read_csv('sample.csv',dtype=object) #提交
-sub['label'] = predictions
-sub['label'] = sub['label'].apply(lambda x:['A','B','C','D'][x])
-
-sub.to_csv('sub01.csv',index=False)
-
-print(np.mean(cv))
+print(cv)

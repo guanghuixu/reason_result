@@ -579,11 +579,11 @@ def _get_causal_mask(seq_length, device):
 def _get_generate_mask(seq_len):
     new_mask = []
     for i in range(1, seq_len+1, 3):
-        new_mask.append([1.0] * i + [0.0] * (seq_len - i))
+        # new_mask.append([1.0] * i + [0.0] * (seq_len - i))
+        new_mask.append([1.0] * (i+2) + [0.0] * (seq_len - (i+2)))
         new_mask.append([1.0] * (i+2) + [0.0] * (seq_len - (i+2)))
         new_mask.append([1.0] * (i+2) + [0.0] * (seq_len - (i+2)))
     return torch.tensor(new_mask)
-
 
 def _batch_gather(x, inds):
     assert x.dim() == 3
