@@ -19,13 +19,13 @@ def load_json(file):
     with open(file) as f:
         return json.load(f)
         
+def load_json_v1(file):
+    with open(file, encoding="utf-8") as f:
+        return json.load(f)
 
 def save_json(value, file):
     with open(file, 'w+', encoding="utf-8") as f:
         json.dump(value, f, ensure_ascii=False)
-
-
-# In[2]:
 
 
 # # only need perform once
@@ -36,6 +36,48 @@ eval_data = load_json('dataset/ccks_task2_eval.json')
 
 names_list = ['reason_type', 'reason_product', 'reason_region', 'reason_industry',
             'result_type', 'result_product', 'result_region', 'result_industry']
+merge_list = ['type', 'product', 'region', 'industry']
+merge_dict = {key: [] for key in merge_list}
+anno_dict = load_json_v1('dataset/split_task_vocab.json')
+for key, value in anno_dict.items():
+    assert value.index('<PAD>')==0
+    value.pop(0)
+    if 'type' not in key:
+        assert value.index('')==0
+        value.pop(0)
+    merge_key = key.split('_')[1]
+    merge_dict[merge_key] = merge_dict[merge_key] + value
+
+merge_len = {}
+for merge_key, value in merge_dict.items():
+    value = list(set(value))
+    merge_dict[merge_key] = ['<PAD>', ''] + value
+    merge_len[merge_key] = len(merge_dict[merge_key])
+save_json(merge_dict, 'dataset/merge_vocabs.json')
+
+# vocab_type = 'merge_vocabs'
+merge_anno = {}
+for anno in train_data:
+    merge_anno[anno['text_id']] = []
+    results = anno['result']
+    for result in results:
+        tmp_dict = {}
+        for task, labels in result.items():
+            merge_name = task.split('_')[1]
+            tmp_dict[task] = np.zeros(merge_len[merge_name])
+            labels = labels.split(',')
+            for label in labels:
+                idx = merge_dict[merge_name].index(label)
+                tmp_dict[task][idx] = 1
+        tmp_dict['cls'] = np.array([1.])
+        merge_anno[anno['text_id']].append(tmp_dict)
+        
+with open('./dataset/merge_labels.npy', 'wb') as f:
+    np.save(f, merge_anno)
+# np.load('./dataset/train_labels.npy', allow_pickle=True).tolist()
+
+assert False
+# previous version
 anno_dict = {key: [] for key in names_list}
 all_vocabs = []
 

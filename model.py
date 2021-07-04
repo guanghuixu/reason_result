@@ -40,6 +40,27 @@ class AttentionClassifier(nn.Module):
         out = self.fc(h)
         return out
 
+class MergeAttentionClassifier(nn.Module):
+    def __init__(self, hidden_size: int, num_classes: int):
+        super(MergeAttentionClassifier, self).__init__()
+        self.projection_q = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.LayerNorm(hidden_size//2)
+        )
+        self.projection_h = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.LayerNorm(hidden_size//2)
+        )
+        self.attn = Attention(hidden_size//2)
+        self.fc = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, query, hidden_states: torch.Tensor, mask: torch.Tensor):
+        query = self.projection_q(query)
+        hidden_states = self.projection_h(hidden_states)
+        h = self.attn(hidden_states, mask)
+        out = self.fc(torch.cat([query, h], dim=1))
+        return out
+
 
 class MultiDropout(nn.Module):
 
@@ -69,14 +90,14 @@ class BertMultiTaskModel(BertPreTrainedModel):
         self.encoder = BertModel.from_pretrained(model_path, config=config)
         self.decoder = MMT(num_hidden_layers=4, hidden_size=config.hidden_size,num_attention_heads=config.num_attention_heads)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        classifier_fn = nn.Linear  # AttentionClassifier
-        self.cls_classifier = nn.Linear(config.hidden_size, 1)
-        # self.task_classifiers['common_vocabs'] = classifier_fn(config.hidden_size, task_num_classes['common_vocabs'])
-        # task_num_classes.pop('common_vocabs')
-        self.task_classifiers = nn.ModuleDict({task: classifier_fn(config.hidden_size, num_classes)
+        self.cls_classifier = nn.Sequential(
+            nn.Linear(config.hidden_size, config.hidden_size//2),
+            nn.ELU(),
+            nn.Linear(config.hidden_size//2, 1),
+            )
+
+        self.task_classifiers = nn.ModuleDict({task+'_classifiers': MergeAttentionClassifier(config.hidden_size, num_classes)
                                                for task, num_classes in task_num_classes.items()})
-        self.reason_gru = nn.GRUCell(config.hidden_size, config.hidden_size)
-        self.result_gru = nn.GRUCell(config.hidden_size, config.hidden_size)
         self.task_num_classes = task_num_classes
         self.loss_fn = nn.BCEWithLogitsLoss(reduction='none')   
 
@@ -85,23 +106,20 @@ class BertMultiTaskModel(BertPreTrainedModel):
         losses = []
         outputs = []
         bi_mask = torch.zeros([15, 15], dtype=torch.float).to(pred_empty_pair.device)
-        reason_weights = torch.cat([self.task_classifiers['common_vocabs'].weight, 
-                                    self.task_classifiers['reason_type'].weight], dim=0)
-        result_weights = torch.cat([self.task_classifiers['common_vocabs'].weight, 
-                                    self.task_classifiers['result_type'].weight], dim=0)
+        type_weights = self.task_classifiers['type_classifiers'].fc.weight
         for i in range(5):
             ii = i*3
             bi_mask[:, ii: (i+1)*3] = 1.
             _, mmt_dec_output = self.decoder(txt_emb, txt_mask, pred_empty_pair.clone(),
-                    reason_weights, result_weights, bi_mask=bi_mask)
+                    type_weights, bi_mask=bi_mask)
                     
             cls, reason, result = mmt_dec_output[:, ii], mmt_dec_output[:, ii+1], mmt_dec_output[:, ii+2] 
-            type_output = self._forward_type_classifier(cls, reason, result)
-            output = self._forward_more_classifier(type_output, reason, result)
+            type_output = self._forward_type_classifier(cls, reason, result, txt_emb, txt_mask==0)
+            output = self._forward_more_classifier(type_output, reason, result, txt_emb, txt_mask==0)
             outputs.append(output)
             if labels is not None:
                 loss = 0.
-                for iii, key in enumerate(['cls'] + CFG['task_list'][1:]):
+                for iii, key in enumerate(['cls'] + CFG['task_list']):
                     lv = self.loss_fn(output[iii], labels[i][key]) / CFG['accum_iter']
                     # if key in ['cls', 'reason_type', 'result_type']:
                     #     lv = lv * 10
@@ -112,51 +130,26 @@ class BertMultiTaskModel(BertPreTrainedModel):
             else:
                 # cls_pred, _, reason_type, _, result_type = type_output
                 pred_empty_pair[:, ii] = (type_output[0]>=0).squeeze(-1)
-                pred_empty_pair[:, ii+1] = type_output[2].argmax(dim=1)
-                pred_empty_pair[:, ii+2] = type_output[4].argmax(dim=1)
+                pred_empty_pair[:, ii+1] = type_output[1].argmax(dim=1)
+                pred_empty_pair[:, ii+2] = type_output[2].argmax(dim=1)
         return losses, outputs
 
-    def _forward_type_classifier(self, cls, reason, result):
+    def _forward_type_classifier(self, cls, reason, result, txt_emb, pad_mask):
         cls_pred = self.cls_classifier(cls)
+        reason_type = self.task_classifiers["type_classifiers"](reason, txt_emb, pad_mask)
+        result_type = self.task_classifiers["type_classifiers"](result, txt_emb, pad_mask)
+        return cls_pred, reason_type, result_type
 
-        reason_hidden = self.reason_gru(reason)
-        reason_type = torch.cat([
-            self.task_classifiers['common_vocabs'](reason_hidden),
-            self.task_classifiers["reason_type"](reason_hidden)], dim=1)
+    def _forward_more_classifier(self, type_output, reason, result, txt_emb, pad_mask):
+        cls_pred, reason_type, result_type = type_output
+        reason_product = self.task_classifiers["product_classifiers"](reason, txt_emb, pad_mask)
+        reason_region = self.task_classifiers["region_classifiers"](reason, txt_emb, pad_mask)
+        reason_industry = self.task_classifiers["industry_classifiers"](reason, txt_emb, pad_mask)
 
-        result_hidden = self.reason_gru(result)
-        result_type = torch.cat([
-            self.task_classifiers['common_vocabs'](result_hidden),
-            self.task_classifiers["result_type"](result_hidden)], dim=1)
-        return cls_pred, reason_hidden, reason_type, result_hidden, result_type
+        result_product = self.task_classifiers["product_classifiers"](result, txt_emb, pad_mask)
+        result_region = self.task_classifiers["region_classifiers"](result, txt_emb, pad_mask)
+        result_industry = self.task_classifiers["industry_classifiers"](result, txt_emb, pad_mask)
 
-    def _forward_more_classifier(self, type_output, reason, result):
-        cls_pred, reason_hidden, reason_type, result_hidden, result_type = type_output
-        reason_hidden = self.reason_gru(reason, reason_hidden)
-        reason_product = torch.cat([
-            self.task_classifiers['common_vocabs'](reason_hidden),
-            self.task_classifiers["reason_product"](reason_hidden)], dim=1)
-        reason_hidden = self.reason_gru(reason, reason_hidden)
-        reason_region = torch.cat([
-            self.task_classifiers['common_vocabs'](reason_hidden),
-            self.task_classifiers["reason_region"](reason_hidden)], dim=1)
-        reason_hidden = self.reason_gru(reason, reason_hidden)
-        reason_industry = torch.cat([
-            self.task_classifiers['common_vocabs'](reason_hidden),
-            self.task_classifiers["reason_industry"](reason_hidden)], dim=1)
-
-        result_hidden = self.result_gru(result, result_hidden)
-        result_product = torch.cat([
-            self.task_classifiers['common_vocabs'](result_hidden),
-            self.task_classifiers["result_product"](result_hidden)], dim=1)
-        result_hidden = self.result_gru(result, result_hidden)
-        result_region = torch.cat([
-            self.task_classifiers['common_vocabs'](result_hidden),
-            self.task_classifiers["result_region"](result_hidden)], dim=1)
-        result_hidden = self.result_gru(result, result_hidden)
-        result_industry = torch.cat([
-            self.task_classifiers['common_vocabs'](result_hidden),
-            self.task_classifiers["result_industry"](result_hidden)], dim=1)
         return cls_pred, reason_type, reason_product, reason_region, reason_industry, \
             result_type, result_product, result_region, result_industry
 

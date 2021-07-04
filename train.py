@@ -15,7 +15,7 @@ from transformers import *
 from config import CFG
 from model import BertMultiTaskModel
 from dataset import MyDataset, BuildDataloader, FoldTrainValDataset
-from utils import compute_metrics,Generation
+from utils import compute_metrics, Generation
 
 
 def seed_everything(seed):
@@ -119,7 +119,8 @@ def test_model(model, val_loader): #验证
             val_batch_f1.update(f1, batch)
             
             tk.set_postfix(loss=val_losses.avg, f1=val_batch_f1.avg)
-            batch_generations = batch_generations + generator.generate_batch(text_ids, output)
+            if step%100==0:
+                batch_generations = batch_generations + generator.generate_batch(text_ids, output)
     with open(f'outputs/result_val.txt', 'w+') as f:
         for generation in batch_generations:
             f.writelines(str(generation)+'\n')
@@ -135,12 +136,11 @@ generator = Generation(vocabs_anno)
 cv = [] #保存每折的最佳准确率
 
 for fold, (trn_idx, val_idx) in enumerate(folds):
-    fold = fold + 100
     train = [train_anno[i] for i in trn_idx]
     val = [train_anno[i] for i in val_idx]
     
-    train_set = MyDataset(train, train_labels, tokenizer, vocab_type=CFG['vocab_type'], max_len=CFG['max_len'])
-    val_set = MyDataset(val, train_labels, tokenizer, vocab_type=CFG['vocab_type'], max_len=CFG['max_len'])
+    train_set = MyDataset(train, train_labels, tokenizer, max_len=CFG['max_len'])
+    val_set = MyDataset(val, train_labels, tokenizer, max_len=CFG['max_len'])
     
     train_loader = BuildDataloader(train_set, batch_size=CFG['train_bs'], shuffle=True, num_workers=CFG['num_workers'], ddp=False)
     val_loader = BuildDataloader(val_set, batch_size=CFG['valid_bs'], shuffle=False, num_workers=CFG['num_workers'], ddp=False)
@@ -169,9 +169,7 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
         if val_acc > best_acc:
             best_acc = val_acc
             torch.save(model.state_dict(), 'checkpoint/{}_fold_{}.pt'.format(CFG['model'].split('/')[-1], fold))
-        if val_loss < max_loss:
-            max_loss = val_loss
-            torch.save(model.state_dict(), 'checkpoint/{}_fold_{}_minloss.pt'.format(CFG['model'].split('/')[-1], fold))
-        torch.save(model.state_dict(), '{}_fold_{}_latest.pt'.format(CFG['model'].split('/')[-1], fold))
+            print('save the best model: {}'.format(best_acc))
+        torch.save(model.state_dict(), 'checkpoint/{}_fold_{}_latest.pt'.format(CFG['model'].split('/')[-1], fold))
     cv.append(best_acc) 
 print(cv)

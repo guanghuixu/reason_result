@@ -39,7 +39,7 @@ seed_everything(CFG['seed'])
 
 test_anno, vocabs_anno, task_num_classes = TestDataset()
 generator = Generation(vocabs_anno)
-test_set = MyDataset(test_anno, labels=None, tokenizer=tokenizer, vocab_type=CFG['vocab_type'], max_len=CFG['max_len'])
+test_set = MyDataset(test_anno, labels=None, tokenizer=tokenizer, max_len=CFG['max_len'])
 test_loader = BuildDataloader(test_set, batch_size=CFG['valid_bs'], shuffle=False, num_workers=CFG['num_workers'], ddp=False)
 
 model_config = BertConfig.from_pretrained(pretrained_model_name_or_path=CFG['model'],

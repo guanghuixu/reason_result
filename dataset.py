@@ -10,29 +10,29 @@ from config import CFG
 task_list = CFG['task_list']
 gt_list = ['cls', 'reason_type', 'reason_product', 'reason_region', 'reason_industry', \
             'result_type', 'result_product', 'result_region', 'result_industry']
-empty_anno = [{'cls': np.array([0.]), 'reason_type':np.zeros([1319]), 'reason_product':np.zeros([1856]), 'reason_region':np.zeros([1510]), 'reason_industry':np.zeros([1420]), \
-            'result_type':np.zeros([1299]), 'result_product':np.zeros([2324]), 'result_region':np.zeros([1378]), 'result_industry':np.zeros([1504])}]
+empty_anno = [{'cls': np.array([0.]), 'reason_type':np.zeros([41]), 'reason_product':np.zeros([2634]), 'reason_region':np.zeros([422]), 'reason_industry':np.zeros([530]), \
+            'result_type':np.zeros([41]), 'result_product':np.zeros([2634]), 'result_region':np.zeros([422]), 'result_industry':np.zeros([530])}]
 
 def FoldTrainValDataset(vocab_type='most_common_1'):
     train_anno = load_json('dataset/ccks_task2_train.json')
-    vocabs_anno = load_json('dataset/global_vocabs.json')[vocab_type]
-    train_labels = np.load(f'dataset/train_labels.npy', allow_pickle=True).tolist()[vocab_type]
-    reason_type_label = [train_labels[i['text_id']][0]['reason_type'].argmax() for i in train_anno]
+    vocabs_anno = load_json('dataset/merge_vocabs.json')  # [vocab_type]
+    train_labels = np.load('dataset/merge_labels.npy', allow_pickle=True).tolist() # [vocab_type]
+    # reason_type_label = [train_labels[i['text_id']][0]['reason_type'].argmax() for i in train_anno]
+    type_label = [f"{train_labels[i['text_id']][0]['reason_type'].argmax()}_{train_labels[i['text_id']][0]['result_type'].argmax()}" for i in train_anno]
     folds = StratifiedKFold(n_splits=CFG['fold_num'], shuffle=True, random_state=CFG['seed'])\
-                        .split(np.arange(len(train_anno)), reason_type_label) #五折交叉验证
+                        .split(np.arange(len(train_anno)), type_label) #五折交叉验证
 
-    task_num_classes = {task: len(vocabs_anno[task]) for task in task_list}
+    task_num_classes = {k: len(v) for k,v in vocabs_anno.items()}
     return train_anno, vocabs_anno, train_labels, task_num_classes, folds
 
 def TestDataset(vocab_type='most_common_1'):
     test_anno = load_json('dataset/ccks_task2_eval.json')
-    vocabs_anno = load_json('dataset/global_vocabs.json')[vocab_type]
-    task_num_classes = {task: len(vocabs_anno[task]) for task in task_list}
+    vocabs_anno = load_json('dataset/merge_vocabs.json')  # [vocab_type]
+    task_num_classes = {k: len(v) for k,v in vocabs_anno.items()}
     return test_anno, vocabs_anno, task_num_classes
 
 class MyDataset(Dataset):
-    def __init__(self, all_anno, labels, tokenizer, vocab_type='most_common_1', max_len=256):
-        self.vocab_type = vocab_type
+    def __init__(self, all_anno, labels, tokenizer, max_len=256):
         self.all_anno = all_anno
         self.labels = labels
         self.tokenizer = tokenizer

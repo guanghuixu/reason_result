@@ -412,11 +412,10 @@ class MMT(BertPreTrainedModel):
                 txt_emb,
                 txt_mask,
                 cls_reason_result,
-                reason_weight,
-                result_weight,
+                type_weight,
                 bi_mask=None):
 
-        pair_embs = self.prev_pred_embeddings(cls_reason_result, reason_weight, result_weight)
+        pair_embs = self.prev_pred_embeddings(cls_reason_result, type_weight)
 
         pair_mask = torch.zeros(
             pair_embs.size(0),
@@ -532,10 +531,10 @@ class PrevPredEmbeddings(nn.Module):
         self.emb_layer_norm = BertLayerNorm(hidden_size, eps=ln_eps)
         self.emb_dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, cls_reason_results, reason_weight, result_weight):
+    def forward(self, cls_reason_results, type_weight):
         seq_length  = cls_reason_results.size(1)
         raw_pair_embs = []
-        embeddings_map =  [self.cls_embeddings, reason_weight, result_weight]
+        embeddings_map =  [self.cls_embeddings, type_weight, type_weight]
         for column in range(seq_length):
             batch_item = cls_reason_results[:, column]
             fn_ids = column%3

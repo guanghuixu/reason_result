@@ -58,7 +58,6 @@ def send_emails(subject="Recording experiments logs", content="Anything you want
 
 class Generation:
     def __init__(self, vocabs_anno):
-        self.common_num = len(vocabs_anno['common_vocabs'])
         self.vocabs_anno = vocabs_anno
         self.sigmoid = torch.nn.Sigmoid()
 
@@ -69,10 +68,7 @@ class Generation:
         tokens = []
         # print(multi_idx)
         for idx in multi_idx:
-            if idx<self.common_num:
-                tokens.append(self.vocabs_anno['common_vocabs'][idx])
-            else:
-                tokens.append(self.vocabs_anno[flag][idx-self.common_num])
+            tokens.append(self.vocabs_anno[flag][idx])
         return ','.join(tokens)
     
     def generate_batch(self, text_ids, output):
@@ -84,24 +80,24 @@ class Generation:
                 group_dict = {}
                 cls_pred, reason_type, reason_product, reason_region, reason_industry, \
                         result_type, result_product, result_region, result_industry = output[group]
-                if self.sigmoid(cls_pred[batch]) < 0.5:
+                if self.sigmoid(cls_pred[batch]) < 0.5 and len(text_id_dict["result"])>0:
                     continue
                 # print(text_ids[batch])
-                group_dict["reason_type"] = self.generate_token([reason_type[batch].argmax().item()], flag="reason_type")
-                group_dict["result_type"] = self.generate_token([result_type[batch].argmax().item()], flag="result_type")
+                group_dict["reason_type"] = self.generate_token([reason_type[batch].argmax().item()], flag="type")
+                group_dict["result_type"] = self.generate_token([result_type[batch].argmax().item()], flag="type")
                 # multi_label_prediction
                 group_dict["reason_product"] = self.generate_token(
-                    self.obtain_multi_idx(reason_product[batch]), flag="reason_product")
+                    self.obtain_multi_idx(reason_product[batch]), flag="product")
                 group_dict["reason_region"] = self.generate_token(
-                    self.obtain_multi_idx(reason_region[batch]), flag="reason_region")
+                    self.obtain_multi_idx(reason_region[batch]), flag="region")
                 group_dict["reason_industry"] = self.generate_token(
-                    self.obtain_multi_idx(reason_industry[batch]), flag="reason_industry")
+                    self.obtain_multi_idx(reason_industry[batch]), flag="industry")
                 group_dict["result_product"] = self.generate_token(
-                    self.obtain_multi_idx(result_product[batch]), flag="result_product")
+                    self.obtain_multi_idx(result_product[batch]), flag="product")
                 group_dict["result_region"] = self.generate_token(
-                    self.obtain_multi_idx(result_region[batch]), flag="result_region")
+                    self.obtain_multi_idx(result_region[batch]), flag="region")
                 group_dict["result_industry"] = self.generate_token(
-                    self.obtain_multi_idx(result_industry[batch]), flag="result_industry")
+                    self.obtain_multi_idx(result_industry[batch]), flag="industry")
                 text_id_dict["result"].append(group_dict)
             batch_generations.append(text_id_dict)
         return batch_generations
@@ -145,15 +141,24 @@ def compute_metrics(output, batch_label: dict):
             # pred[key] = pred[pred_keys[0]]
             if result['cls'] == 1 and key in pred.keys(): # 预测的三元组是对的
                 cur_pred = pred.pop(key)
-                anno_pred_num += sum([item.sum() for item in cur_pred])
+                anno_pred_num = 0
+                for item in cur_pred:
+                    # item[0] = 0 # remove padding
+                    item[1] = 0 # remove ''
+                    anno_pred_num += item.sum()
                 for i, each_item in enumerate(fine_grained):
+                    result[each_item][1] = 0
                     anno_gt_num += result[each_item].sum()
                     correct_num += (result[each_item]*cur_pred[i]).sum()
             elif result['cls'] == 1: # 预测不对，只统计gt的标注
                 for i, each_item in enumerate(fine_grained):
+                    result[each_item][1] = 0
                     anno_gt_num += result[each_item].sum()
-
-        anno_pred_num += sum([each_pred_item.sum() for values in pred.values() for each_pred_item in values])
+        anno_pred_num = 0
+        for values in pred.values():
+            for each_pred_item in values:
+                each_pred_item[1] = 0
+                anno_pred_num += each_pred_item.sum()
         precision = correct_num / max(anno_pred_num, 1)
         recall = correct_num / max(anno_gt_num, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1)
