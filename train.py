@@ -15,7 +15,7 @@ from transformers import *
 from config import CFG
 from model import BertMultiTaskModel
 from dataset import MyDataset, BuildDataloader, FoldTrainValDataset
-from utils import compute_metrics
+from utils import compute_metrics,Generation
 
 
 def seed_everything(seed):
@@ -99,11 +99,11 @@ def test_model(model, val_loader): #验证
     val_batch_precision = AverageMeter()
     val_batch_recall = AverageMeter()
     val_batch_f1 = AverageMeter()
+    batch_generations = []
 
-    
     with torch.no_grad():
         tk = tqdm(val_loader, total=len(val_loader), position=0, leave=True)
-        for step, (_, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
+        for step, (text_ids, input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result, gt_for_eval) in enumerate(tk):
     
             input_ids, attention_mask, token_type_ids = input_ids.to(device), attention_mask.to(device), token_type_ids.to(device)
             labels_dict = [{key: value.to(device) for key, value in labels.items()} for labels in labels_dict]
@@ -119,18 +119,23 @@ def test_model(model, val_loader): #验证
             val_batch_f1.update(f1, batch)
             
             tk.set_postfix(loss=val_losses.avg, f1=val_batch_f1.avg)
+            batch_generations = batch_generations + generator.generate_batch(text_ids, output)
+    with open(f'outputs/result_val.txt', 'w+') as f:
+        for generation in batch_generations:
+            f.writelines(str(generation)+'\n')
        
     return val_losses.avg, val_batch_f1.avg
 
 
 seed_everything(CFG['seed'])
 
-train_anno, train_labels, task_num_classes, folds = FoldTrainValDataset()
+train_anno, vocabs_anno, train_labels, task_num_classes, folds = FoldTrainValDataset()
+generator = Generation(vocabs_anno)
 
 cv = [] #保存每折的最佳准确率
 
 for fold, (trn_idx, val_idx) in enumerate(folds):
-
+    fold = fold + 100
     train = [train_anno[i] for i in trn_idx]
     val = [train_anno[i] for i in val_idx]
     
@@ -141,6 +146,7 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
     val_loader = BuildDataloader(val_set, batch_size=CFG['valid_bs'], shuffle=False, num_workers=CFG['num_workers'], ddp=False)
     
     best_acc = 0
+    max_loss = 10000
 
     model_config = BertConfig.from_pretrained(pretrained_model_name_or_path=CFG['model'],
                                                 output_hidden_states=True)
@@ -162,7 +168,10 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
 
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), '{}_fold_{}.pt'.format(CFG['model'].split('/')[-1], fold))
-            
+            torch.save(model.state_dict(), 'checkpoint/{}_fold_{}.pt'.format(CFG['model'].split('/')[-1], fold))
+        if val_loss < max_loss:
+            max_loss = val_loss
+            torch.save(model.state_dict(), 'checkpoint/{}_fold_{}_minloss.pt'.format(CFG['model'].split('/')[-1], fold))
+        torch.save(model.state_dict(), '{}_fold_{}_latest.pt'.format(CFG['model'].split('/')[-1], fold))
     cv.append(best_acc) 
 print(cv)

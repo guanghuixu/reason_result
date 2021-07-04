@@ -22,7 +22,7 @@ def FoldTrainValDataset(vocab_type='most_common_1'):
                         .split(np.arange(len(train_anno)), reason_type_label) #五折交叉验证
 
     task_num_classes = {task: len(vocabs_anno[task]) for task in task_list}
-    return train_anno, train_labels, task_num_classes, folds
+    return train_anno, vocabs_anno, train_labels, task_num_classes, folds
 
 def TestDataset(vocab_type='most_common_1'):
     test_anno = load_json('dataset/ccks_task2_eval.json')

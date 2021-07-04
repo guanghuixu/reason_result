@@ -49,9 +49,9 @@ model =  BertMultiTaskModel(config=model_config, task_num_classes=task_num_class
 
 predictions = []
 
-for fold in [5]: # [0,1,2,3,4]: #把训练后的五个模型挨个进行预测
+for fold in [100]: # [0,1,2,3,4]: #把训练后的五个模型挨个进行预测
     batch_generations = []
-    train_param = torch.load('{}_fold_{}_latest.pt'.format(CFG['model'].split('/')[-1], fold))
+    train_param = torch.load('checkpoint/{}_fold_{}_latest.pt'.format(CFG['model'].split('/')[-1], fold))
     train_param = {key.replace('module.', ''): value for key,value in train_param.items()}
     model.load_state_dict(train_param)
     

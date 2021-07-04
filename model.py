@@ -78,7 +78,7 @@ class BertMultiTaskModel(BertPreTrainedModel):
         self.reason_gru = nn.GRUCell(config.hidden_size, config.hidden_size)
         self.result_gru = nn.GRUCell(config.hidden_size, config.hidden_size)
         self.task_num_classes = task_num_classes
-        self.loss_fn = nn.BCEWithLogitsLoss()   
+        self.loss_fn = nn.BCEWithLogitsLoss(reduction='none')   
 
     def _forward_output(self, txt_emb, txt_mask, cls_reason_result, labels=None):
         pred_empty_pair = _get_empty_emb(cls_reason_result)
@@ -103,9 +103,9 @@ class BertMultiTaskModel(BertPreTrainedModel):
                 loss = 0.
                 for iii, key in enumerate(['cls'] + CFG['task_list'][1:]):
                     lv = self.loss_fn(output[iii], labels[i][key]) / CFG['accum_iter']
-                    if key in ['cls', 'reason_type', 'result_type']:
-                        lv = lv * 10
-                    loss += lv
+                    # if key in ['cls', 'reason_type', 'result_type']:
+                    #     lv = lv * 10
+                    loss += lv.sum(1).mean()
                 losses.append(loss)
             if self.training:  # teacher forcing
                 pred_empty_pair[:, ii:(i+1)*3] = cls_reason_result[:, ii:(i+1)*3]
@@ -174,7 +174,7 @@ class BertMultiTaskModel(BertPreTrainedModel):
             token_type_ids=token_type_ids,
         )
         txt_emb = self.dropout(txt_emb[0])
-        losses, outputs = self._forward_output(txt_emb, input_ids.ge(0), cls_reason_result, labels=labels)
+        losses, outputs = self._forward_output(txt_emb, input_ids.gt(0), cls_reason_result, labels=labels)
         return (sum(losses), outputs)
 
 
