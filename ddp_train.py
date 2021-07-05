@@ -167,13 +167,20 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
     model_config = BertConfig.from_pretrained(pretrained_model_name_or_path=CFG['model'],
                                                 output_hidden_states=True)
     model =  BertMultiTaskModel(config=model_config, task_num_classes=task_num_classes,
-                                   model_path=CFG['model']).to(device) #模型
+                                   model_path=CFG['model'])  # .to(device) #模型
+    if len(CFG['resume_file']):
+        train_param = torch.load(CFG['resume_file'], map_location={"cuda": 'cpu'})
+        train_param = {key.replace('module.', ''): value for key,value in train_param.items()}
+        model.load_state_dict(train_param)
+    model = model.to(device)
     sync_bn_model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(sync_bn_model, device_ids=[local_rank], 
                                                     output_device=local_rank, find_unused_parameters=True)
     
     scaler = GradScaler()
-    optimizer = AdamW(model.parameters(), lr=CFG['lr'], weight_decay=CFG['weight_decay']) #AdamW优化器
+    optimizer = AdamW(model.get_optimizer_parameters(CFG['lr'], lr_scale=0.01, finetune=True), 
+                    lr=CFG['lr'], weight_decay=CFG['weight_decay']) #AdamW优化器
+    # optimizer = AdamW(model.parameters(), lr=CFG['lr'], weight_decay=CFG['weight_decay']) #AdamW优化器
     scheduler = get_cosine_schedule_with_warmup(optimizer, len(train_loader)//CFG['accum_iter'], CFG['epochs']*len(train_loader)//CFG['accum_iter'])
     #get_cosine_schedule_with_warmup策略，学习率先warmup一个epoch，然后cos式下降
 

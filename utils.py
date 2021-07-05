@@ -113,7 +113,7 @@ def transform_output2batch(output):
         for group in range(5):
             cls_pred, reason_type, reason_product, reason_region, reason_industry, \
                     result_type, result_product, result_region, result_industry = output[group]
-            if sigmoid(cls_pred[batch]) < 0.5:
+            if sigmoid(cls_pred[batch]) < 0.5 and len(batch_predictions[batch])>1:
                 continue
             key = f"{reason_type[batch].argmax()}_{result_type[batch].argmax()}"
             value = [ge_threshold(reason_product[batch]),

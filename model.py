@@ -101,6 +101,31 @@ class BertMultiTaskModel(BertPreTrainedModel):
         self.task_num_classes = task_num_classes
         self.loss_fn = nn.BCEWithLogitsLoss(reduction='none')   
 
+    def get_optimizer_parameters(self, base_lr, lr_scale=0.01, finetune=True):
+        optimizer_param_groups = []
+        self.finetune_modules = [self.encoder]
+        finetune_params_set = set()
+        if finetune:
+            for m in self.finetune_modules:
+                # if getattr(m, 'module'):
+                #     m = m['module']
+                optimizer_param_groups.append({
+                    "params": list(m.parameters()),
+                    "lr": base_lr * lr_scale
+                })
+                finetune_params_set.update(list(m.parameters()))
+        else:
+            print('The parameters are fixed: ', self.finetune_modules)
+        # remaining_params are those parameters w/ default lr
+        remaining_params = [
+            p for p in self.parameters() if p not in finetune_params_set
+        ]
+        # put the default lr parameters at the beginning
+        # so that the printed lr (of group 0) matches the default lr
+        optimizer_param_groups.insert(0, {"params": remaining_params})
+
+        return optimizer_param_groups
+
     def _forward_output(self, txt_emb, txt_mask, cls_reason_result, labels=None):
         pred_empty_pair = _get_empty_emb(cls_reason_result)
         losses = []
@@ -118,12 +143,14 @@ class BertMultiTaskModel(BertPreTrainedModel):
             output = self._forward_more_classifier(type_output, reason, result, txt_emb, txt_mask==0)
             outputs.append(output)
             if labels is not None:
-                loss = 0.
-                for iii, key in enumerate(['cls'] + CFG['task_list']):
-                    lv = self.loss_fn(output[iii], labels[i][key]) / CFG['accum_iter']
+                label = labels[i]
+                loss = self.loss_fn(output[0], label['cls']).sum(1).mean()  # cls_pred
+                loss_mask = label['cls']
+                for iii, key in enumerate(CFG['task_list']):
+                    lv = self.loss_fn(output[iii+1], labels[i][key]) / CFG['accum_iter']
                     # if key in ['cls', 'reason_type', 'result_type']:
                     #     lv = lv * 10
-                    loss += lv.sum(1).mean()
+                    loss += (lv.sum(1)*loss_mask).mean()
                 losses.append(loss)
             if self.training:  # teacher forcing
                 pred_empty_pair[:, ii:(i+1)*3] = cls_reason_result[:, ii:(i+1)*3]
