@@ -15,7 +15,7 @@ from transformers import *
 from config import CFG
 from model import BertMultiTaskModel
 from dataset import MyDataset, BuildDataloader, FoldTrainValDataset
-from utils import compute_metrics, Generation
+from utils import compute_metrics, Generation, PGLoss
 import torch.distributed as dist
 
 def get_rank():
@@ -86,6 +86,11 @@ def train_model(model, train_loader): #训练一个epoch
 
         with autocast(): #使用半精度训练
             loss, output = model(input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result)
+            precision, recall, f1 = compute_metrics(output, gt_for_eval)
+            if CFG['using_pg']:
+                pg_loss = PGLoss(output, recall, baseline=batch_recall.avg) # , 
+                                # more_metrics=([precision, batch_precision.avg], [recall, batch_recall.avg]))
+                loss = loss+ pg_loss
             scaler.scale(loss).backward()
             
             if ((step + 1) %  CFG['accum_iter'] == 0) or ((step + 1) == len(train_loader)): #梯度累加
@@ -94,12 +99,12 @@ def train_model(model, train_loader): #训练一个epoch
                 optimizer.zero_grad() 
                 scheduler.step()
 
-        batch = input_ids.size(0)
-        precision, recall, f1 = compute_metrics(output, gt_for_eval)
-        losses.update(loss.item()*CFG['accum_iter'], batch)
-        batch_precision.update(precision, batch)
-        batch_recall.update(recall, batch)
-        batch_f1.update(f1, batch)
+            batch = input_ids.size(0)
+            # precision, recall, f1 = compute_metrics(output, gt_for_eval)
+            losses.update(loss.item()*CFG['accum_iter'], batch)
+            batch_precision.update(precision, batch)
+            batch_recall.update(recall, batch)
+            batch_f1.update(f1, batch)
         
         tk.set_postfix(loss=losses.avg, f1=batch_f1.avg)
         
@@ -125,9 +130,12 @@ def test_model(model, val_loader): #验证
             cls_reason_result = cls_reason_result.to(device)
 
             loss, output = model(input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result)
-
-            batch = input_ids.size(0)
             precision, recall, f1 = compute_metrics(output, gt_for_eval)
+            if CFG['using_pg']:
+                pg_loss = PGLoss(output, recall, baseline=val_batch_recall.avg) #,
+                        # more_metrics=([precision, val_batch_precision.avg], [recall, val_batch_recall.avg]))
+                loss = loss + pg_loss
+            batch = input_ids.size(0)
             val_losses.update(loss.item()*CFG['accum_iter'], batch)
             val_batch_precision.update(precision, batch)
             val_batch_recall.update(recall, batch)
@@ -152,7 +160,7 @@ generator = Generation(vocabs_anno)
 cv = [] #保存每折的最佳准确率
 
 for fold, (trn_idx, val_idx) in enumerate(folds):
-    fold = 'ddp_merge_classifer'  #  skip the previous running
+    fold = f'ddp_merge_pg_{fold}'  #  skip the previous running
     train = [train_anno[i] for i in trn_idx]
     val = [train_anno[i] for i in val_idx]
     
@@ -167,18 +175,16 @@ for fold, (trn_idx, val_idx) in enumerate(folds):
     model_config = BertConfig.from_pretrained(pretrained_model_name_or_path=CFG['model'],
                                                 output_hidden_states=True)
     model =  BertMultiTaskModel(config=model_config, task_num_classes=task_num_classes,
-                                   model_path=CFG['model'])  # .to(device) #模型
-    if len(CFG['resume_file']):
-        train_param = torch.load(CFG['resume_file'], map_location={"cuda": 'cpu'})
+                                   model_path=CFG['model']).to(device) #模型
+    if is_main_process() and len(CFG['resume_file']):
+        train_param = torch.load(CFG['resume_file'], map_location={"cuda": device})
         train_param = {key.replace('module.', ''): value for key,value in train_param.items()}
         model.load_state_dict(train_param)
-    model = model.to(device)
     sync_bn_model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(sync_bn_model, device_ids=[local_rank], 
                                                     output_device=local_rank, find_unused_parameters=True)
-    
     scaler = GradScaler()
-    optimizer = AdamW(model.get_optimizer_parameters(CFG['lr'], lr_scale=0.01, finetune=True), 
+    optimizer = AdamW(model.module.get_optimizer_parameters(CFG['lr'], lr_scale=0.01, finetune=True), 
                     lr=CFG['lr'], weight_decay=CFG['weight_decay']) #AdamW优化器
     # optimizer = AdamW(model.parameters(), lr=CFG['lr'], weight_decay=CFG['weight_decay']) #AdamW优化器
     scheduler = get_cosine_schedule_with_warmup(optimizer, len(train_loader)//CFG['accum_iter'], CFG['epochs']*len(train_loader)//CFG['accum_iter'])

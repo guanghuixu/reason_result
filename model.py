@@ -152,7 +152,7 @@ class BertMultiTaskModel(BertPreTrainedModel):
                     #     lv = lv * 10
                     loss += (lv.sum(1)*loss_mask).mean()
                 losses.append(loss)
-            if self.training:  # teacher forcing
+            if self.training: #  and not (CFG['using_pg']):  # teacher forcing
                 pred_empty_pair[:, ii:(i+1)*3] = cls_reason_result[:, ii:(i+1)*3]
             else:
                 # cls_pred, _, reason_type, _, result_type = type_output

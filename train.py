@@ -15,7 +15,7 @@ from transformers import *
 from config import CFG
 from model import BertMultiTaskModel
 from dataset import MyDataset, BuildDataloader, FoldTrainValDataset
-from utils import compute_metrics, Generation
+from utils import compute_metrics, Generation, PGLoss
 
 
 def seed_everything(seed):
@@ -72,6 +72,11 @@ def train_model(model, train_loader): #训练一个epoch
 
         with autocast(): #使用半精度训练
             loss, output = model(input_ids, attention_mask, token_type_ids, labels_dict, cls_reason_result)
+            precision, recall, f1 = compute_metrics(output, gt_for_eval)
+            if CFG['using_pg']:
+                pg_loss = PGLoss(output, f1)
+                loss = loss + pg_loss
+            
             scaler.scale(loss).backward()
             
             if ((step + 1) %  CFG['accum_iter'] == 0) or ((step + 1) == len(train_loader)): #梯度累加
@@ -80,12 +85,11 @@ def train_model(model, train_loader): #训练一个epoch
                 optimizer.zero_grad() 
                 scheduler.step()
 
-        batch = input_ids.size(0)
-        precision, recall, f1 = compute_metrics(output, gt_for_eval)
-        losses.update(loss.item()*CFG['accum_iter'], batch)
-        batch_precision.update(precision, batch)
-        batch_recall.update(recall, batch)
-        batch_f1.update(f1, batch)
+            batch = input_ids.size(0)
+            losses.update(loss.item()*CFG['accum_iter'], batch)
+            batch_precision.update(precision, batch)
+            batch_recall.update(recall, batch)
+            batch_f1.update(f1, batch)
         
         tk.set_postfix(loss=losses.avg, f1=batch_f1.avg)
         

@@ -12,6 +12,23 @@ from torch.nn.modules import activation
 from config import CFG
 import torch
 import numpy as np
+import torch.nn.functional as F
+
+def PGLoss(output, batch_f1, baseline=0, more_metrics=None):
+    action_probability = []
+    for group_pred in output:
+        # mask = group_pred[0]>=0
+        for pred in group_pred:
+            score = pred.softmax(-1).max(-1)[0]
+            action_probability.append(score)
+    log_probability = (torch.stack(action_probability, dim=1)+1e-12).log().sum(-1)
+    reward = torch.tensor(batch_f1).to(log_probability.device) - baseline
+    pg_loss = - reward * log_probability
+    if more_metrics is not None:
+        for (batch_metrics, baseline) in more_metrics:
+            reward = torch.tensor(batch_metrics).to(log_probability.device) - baseline
+            pg_loss += - reward * log_probability
+    return pg_loss.mean()
 
 def txt2json(file):
     data_list = []
